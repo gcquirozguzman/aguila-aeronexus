@@ -1,0 +1,22 @@
+# Entorno de Python
+.venv/
+__pycache__/
+*.pyc
+
+# Datos descargados (no se suben: pesan y se descargan de Kaggle)
+datos/
+
+# Credenciales y secretos: nunca al repositorio
+credentials.json
+*credentials*.json
+*.key
+*.pem
+.env
+.env.*
+!.env.example
+
+# Archivos del sistema y editores
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
