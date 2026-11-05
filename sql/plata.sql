@@ -66,3 +66,7 @@ FROM plata.vuelos v
 LEFT JOIN plata.aeropuertos ao ON v.origen_iata = ao.iata
 LEFT JOIN plata.aeropuertos ad ON v.destino_iata = ad.iata
 LEFT JOIN plata.clima_diario c ON c.icao = ao.icao AND c.fecha = v.fecha;
+
+-- 5. Cuarentena: vuelos que no pasaron las reglas de calidad del batch de Spark
+LOAD DATA OVERWRITE plata.vuelos_cuarentena
+FROM FILES (format = 'PARQUET', uris = ['gs://aguila-aeronexus-bronce/plata/vuelos_cuarentena/*.parquet']);

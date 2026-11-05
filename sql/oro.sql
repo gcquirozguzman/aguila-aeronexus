@@ -114,3 +114,25 @@ FROM oro.fact_vuelos f
 LEFT JOIN oro.dim_clima c ON c.clima_id = f.clima_origen_id
 WHERE f.causa_principal IS NOT NULL
 GROUP BY 1, 2;
+
+-- Clima actual: último METAR de cada aeropuerto (tiempo real), con su condición de vuelo
+CREATE OR REPLACE VIEW oro.clima_actual AS
+SELECT
+  a.aeropuerto_id,
+  m.icao,
+  a.nombre,
+  a.ciudad,
+  m.ts_observacion,
+  m.temp_c,
+  m.viento_nudos,
+  m.rafaga_nudos,
+  m.visibilidad,
+  m.fenomenos,
+  m.categoria_vuelo,
+  m.categoria_vuelo IN ('IFR', 'LIFR') OR IFNULL(m.rafaga_nudos, 0) >= 25
+    OR REGEXP_CONTAINS(IFNULL(m.fenomenos, ''), r'TS|SN|FZ') AS condicion_adversa,
+  m.metar_crudo
+FROM plata.metar m
+JOIN oro.dim_aeropuerto a ON a.icao = m.icao
+WHERE TRUE
+QUALIFY ROW_NUMBER() OVER (PARTITION BY m.icao ORDER BY m.ts_observacion DESC) = 1;

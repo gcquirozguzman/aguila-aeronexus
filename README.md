@@ -17,6 +17,28 @@ arquitectura medallion (bronce, plata y oro). Proyecto del curso de Big Data (UT
 | `ingesta/` | Cloud Run Job (OpenSky y METAR → Pub/Sub) y colector para la PC |
 | `sql/` | `plata.sql` (catálogos, clima NOAA y cruce) y `oro.sql` (modelo estrella y vistas de OTP) |
 
+## Tablas principales
+
+| Capa | Tabla o vista | Contenido |
+|---|---|---|
+| bronce (GCS) | `flight_delays/`, `openflights/`, `metar/`, `grabaciones/opensky/` | Archivos crudos tal como llegan |
+| plata | `vuelos`, `vuelos_cuarentena`, `vuelos_enriquecidos`, `clima_diario` | Vuelos 2015 limpios, inválidos y cruzados con clima |
+| plata | `posiciones`, `metar` | Tiempo real, particionadas por día y agrupadas por aeropuerto |
+| oro | `fact_vuelos`, `dim_*`, `fact_posiciones` | Modelo estrella |
+| oro | `otp_por_ruta`, `otp_por_aerolinea`, `causas_retraso`, `clima_actual` | Vistas para el negocio |
+
+## Seguridad
+
+Cada pipeline usa su propia cuenta de servicio con permisos mínimos:
+
+| Cuenta | Usada por | Permisos |
+|---|---|---|
+| `sa-ingesta` | Cloud Run Jobs y Cloud Scheduler | Publicar en `posiciones` y `metar`, bucket bronce, leer el secreto de OpenSky, ejecutar los jobs |
+| `sa-dataflow` | Dataflow | Leer las suscripciones, publicar en `errores`, escribir en `plata`, bucket bronce |
+| `sa-dataproc` | Dataproc Serverless | Bucket bronce |
+
+La credencial de OpenSky vive en Secret Manager (`opensky-credentials`), nunca en el código.
+
 ## Fuentes
 
 OpenSky Network, aviationweather.gov (METAR), Flight Delays 2015 (BTS/Kaggle), NOAA GSOD (BigQuery público) y OpenFlights.
@@ -33,10 +55,13 @@ py -3.12 -m venv .venv
 
 # por lotes
 gcloud storage cp batch/limpiar_vuelos.py gs://aguila-aeronexus-bronce/codigo/
-gcloud dataproc batches submit pyspark gs://aguila-aeronexus-bronce/codigo/limpiar_vuelos.py --region=us-central1 --version=2.2 -- gs://aguila-aeronexus-bronce/flight_delays/2015/flights.csv gs://aguila-aeronexus-bronce/plata
+gcloud dataproc batches submit pyspark gs://aguila-aeronexus-bronce/codigo/limpiar_vuelos.py --region=us-central1 --version=2.2 --service-account=sa-dataproc@aguila-aeronexus.iam.gserviceaccount.com -- gs://aguila-aeronexus-bronce/flight_delays/2015/flights.csv gs://aguila-aeronexus-bronce/plata
 
 # tiempo real (local, gratis)
 .venv\Scripts\python streaming/pipeline.py --runner DirectRunner --temp_location gs://aguila-aeronexus-bronce/tmp
+
+# tiempo real (Dataflow, 1 worker)
+.venv\Scripts\python streaming/pipeline.py --runner DataflowRunner --region us-central1 --temp_location gs://aguila-aeronexus-bronce/tmp --staging_location gs://aguila-aeronexus-bronce/staging --job_name aguila-streaming --num_workers 1 --max_num_workers 1 --machine_type n1-standard-2 --enable_streaming_engine --experiments use_runner_v2 --service_account_email sa-dataflow@aguila-aeronexus.iam.gserviceaccount.com
 ```
 
 ## Licencia

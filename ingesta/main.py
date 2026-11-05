@@ -2,7 +2,7 @@
 
 Modos:
   Cloud Run Job (Cloud Scheduler cada 2 min con FUENTE=opensky y cada 5 min con FUENTE=metar):
-    - metar: consulta aviationweather.gov en vivo.
+    - metar: consulta aviationweather.gov en vivo y guarda la respuesta cruda en Cloud Storage (capa bronce).
     - opensky: intenta OpenSky en vivo. OpenSky bloquea las IP de los grandes proveedores de nube, así que
       si no responde, reproduce la grabación real más reciente guardada en Cloud Storage (modo "reproduccion").
   Colector en la PC (python ingesta/colector_pc.py):
@@ -27,6 +27,7 @@ from google.cloud import pubsub_v1, storage
 PROYECTO = os.environ.get("PROYECTO", "aguila-aeronexus")
 BUCKET = "aguila-aeronexus-bronce"
 GRABACIONES = "grabaciones/opensky/"
+METAR_CRUDO = "metar/"
 TOKEN_URL = "https://auth.opensky-network.org/auth/realms/opensky-network/protocol/openid-connect/token"
 ESTADOS_URL = "https://opensky-network.org/api/states/all"
 METAR_URL = "https://aviationweather.gov/api/data/metar"
@@ -64,9 +65,9 @@ def leer_opensky():
             "creditos_restantes": r.headers.get("X-Rate-Limit-Remaining")}
 
 
-def grabar(lote):
+def grabar(lote, prefijo=GRABACIONES):
     """Guarda la consulta en vivo en Cloud Storage para poder reproducirla después."""
-    blob = storage.Client(project=PROYECTO).bucket(BUCKET).blob(f"{GRABACIONES}{lote['ts_consulta']}.json")
+    blob = storage.Client(project=PROYECTO).bucket(BUCKET).blob(f"{prefijo}{lote['ts_consulta']}.json")
     blob.upload_from_string(json.dumps(lote, separators=(",", ":")), content_type="application/json")
 
 
@@ -114,6 +115,8 @@ def main():
     if lote is None:
         print("colector de la PC en vivo: esta ejecución no publica")
         return
+    if fuente == "metar":
+        grabar(lote, METAR_CRUDO)  # copia cruda en bronce, para reprocesar si hace falta
     publicar(lote, fuente)
 
 

@@ -125,9 +125,12 @@ def limpiar_metar(m):
     }
 
 
-def bq(tabla, esquema):
+def bq(tabla, esquema, campo_fecha, agrupar):
+    # si la tabla no existe, se crea particionada por día y agrupada (consultas más baratas)
     return beam.io.WriteToBigQuery(
         f"{PROYECTO}:plata.{tabla}", schema=esquema,
+        additional_bq_parameters={"timePartitioning": {"type": "DAY", "field": campo_fecha},
+                                  "clustering": {"fields": agrupar}},
         create_disposition=beam.io.BigQueryDisposition.CREATE_IF_NEEDED,
         write_disposition=beam.io.BigQueryDisposition.WRITE_APPEND,
         method=beam.io.WriteToBigQuery.Method.STREAMING_INSERTS)
@@ -147,7 +150,7 @@ def run(argv=None):
             | "Separar aviones" >> beam.FlatMap(separar_lote)
             | "Validar y enriquecer" >> beam.ParDo(EnriquecerAvion()).with_outputs(EnriquecerAvion.ERRORES, main="ok")
         )
-        aviones.ok | "Guardar posiciones" >> bq("posiciones", ESQUEMA_POSICIONES)
+        aviones.ok | "Guardar posiciones" >> bq("posiciones", ESQUEMA_POSICIONES, "ts_consulta", ["aeropuerto_cercano_iata", "icao24"])
         aviones.errores | "Enviar errores" >> beam.io.WriteToPubSub(f"projects/{PROYECTO}/topics/errores")
 
         (
@@ -155,7 +158,7 @@ def run(argv=None):
             | "Leer METAR" >> beam.io.ReadFromPubSub(subscription=f"{sub}/metar-sub")
             | "Separar reportes" >> beam.FlatMap(separar_lote)
             | "Limpiar METAR" >> beam.FlatMap(limpiar_metar)
-            | "Guardar METAR" >> bq("metar", ESQUEMA_METAR)
+            | "Guardar METAR" >> bq("metar", ESQUEMA_METAR, "ts_observacion", ["icao"])
         )
 
 
