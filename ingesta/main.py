@@ -18,7 +18,9 @@ Variables de entorno:
 """
 import json
 import os
+import random
 import sys
+import time
 from datetime import datetime, timezone
 
 import requests
@@ -37,6 +39,8 @@ AEROPUERTOS = ["KATL", "KORD", "KDFW", "KDEN", "KLAX", "KJFK", "KSFO", "KLAS", "
 CAMPOS = ["icao24", "callsign", "pais_origen", "ts_posicion", "ts_contacto", "longitud", "latitud", "altitud_baro_m",
           "en_tierra", "velocidad_ms", "rumbo", "velocidad_vertical_ms", "sensores", "altitud_geo_m", "squawk",
           "spi", "fuente_posicion"]
+INTENTOS = 4          # 1 intento + 3 reintentos
+ESPERA_MAXIMA = 60    # segundos; si la API pide más, se usa el respaldo en lugar de esperar
 
 
 def ahora():
@@ -51,14 +55,42 @@ def credencial():
     return json.loads(secretmanager.SecretManagerServiceClient().access_secret_version(name=nombre).payload.data)
 
 
+def pedir(metodo, url, intentos=INTENTOS, **kwargs):
+    """HTTP con reintentos y backoff exponencial (2, 4 y 8 s, más un azar de hasta 1 s).
+
+    Reintenta ante caídas de red, tiempo agotado, límite de tasa (429) y errores del servidor (5xx).
+    Si la API pide esperar (Retry-After o X-Rate-Limit-Retry-After-Seconds), respeta esa espera; si pide más
+    de ESPERA_MAXIMA, no insiste: el llamador pasa a su respaldo.
+    """
+    for n in range(1, intentos + 1):
+        espera = 2 ** n + random.uniform(0, 1)
+        try:
+            r = requests.request(metodo, url, **kwargs)
+        except (requests.ConnectionError, requests.Timeout) as e:
+            error = e
+        else:
+            if r.status_code != 429 and r.status_code < 500:
+                r.raise_for_status()  # 4xx distinto de 429: reintentar no lo arregla
+                return r
+            error = requests.HTTPError(f"HTTP {r.status_code}", response=r)
+            pedida = r.headers.get("X-Rate-Limit-Retry-After-Seconds") or r.headers.get("Retry-After")
+            if pedida and pedida.isdigit():
+                if int(pedida) > ESPERA_MAXIMA:
+                    print(f"{url}: la API pide esperar {pedida} s; no se reintenta")
+                    raise error
+                espera = int(pedida)
+        if n == intentos:
+            raise error
+        print(f"{url}: intento {n} de {intentos} falló ({type(error).__name__}); reintento en {espera:.0f} s")
+        time.sleep(espera)
+
+
 def leer_opensky():
     cred = credencial()
-    t = requests.post(TOKEN_URL, data={"grant_type": "client_credentials", "client_id": cred["clientId"],
-                                       "client_secret": cred["clientSecret"]}, timeout=10)
-    t.raise_for_status()
-    r = requests.get(ESTADOS_URL, params=EEUU, headers={"Authorization": f"Bearer {t.json()['access_token']}"},
-                     timeout=60)
-    r.raise_for_status()
+    t = pedir("POST", TOKEN_URL, data={"grant_type": "client_credentials", "client_id": cred["clientId"],
+                                        "client_secret": cred["clientSecret"]}, timeout=(10, 20))
+    r = pedir("GET", ESTADOS_URL, params=EEUU, headers={"Authorization": f"Bearer {t.json()['access_token']}"},
+              timeout=(10, 60))
     datos = r.json()
     return {"fuente": "opensky", "modo": "vivo", "ts_consulta": datos.get("time"),
             "registros": [dict(zip(CAMPOS, fila)) for fila in (datos.get("states") or [])],
@@ -89,13 +121,13 @@ def leer_aviones():
     try:
         return leer_opensky()
     except requests.RequestException as e:
-        print(f"OpenSky no responde ({type(e).__name__}): se reproduce la grabación real más reciente")
+        print(f"OpenSky no responde tras {INTENTOS} intentos ({type(e).__name__}): "
+              "se reproduce la grabación real más reciente")
         return leer_grabacion()
 
 
 def leer_metar():
-    r = requests.get(METAR_URL, params={"ids": ",".join(AEROPUERTOS), "format": "json"}, timeout=60)
-    r.raise_for_status()
+    r = pedir("GET", METAR_URL, params={"ids": ",".join(AEROPUERTOS), "format": "json"}, timeout=(10, 60))
     return {"fuente": "metar", "modo": "vivo", "ts_consulta": ahora(), "registros": r.json()}
 
 

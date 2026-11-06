@@ -91,13 +91,25 @@ FROM plata.posiciones p
 LEFT JOIN oro.dim_aerolinea a ON a.aerolinea_icao = p.aerolinea_icao;
 
 -- Vistas de puntualidad (OTP = % de vuelos con 15 min de retraso o menos)
-CREATE OR REPLACE VIEW oro.otp_por_ruta AS
-SELECT origen_id, destino_id, COUNT(*) AS vuelos,
-       ROUND(100 * AVG(CAST(a_tiempo AS INT64)), 1) AS otp_pct,
-       ROUND(AVG(retraso_llegada_min), 1) AS retraso_promedio_min
+
+-- Vista materializada: BigQuery guarda los totales por ruta ya calculados y los actualiza solo cuando
+-- cambia fact_vuelos; cada consulta de OTP por ruta lee unos miles de filas en lugar de 5.3 millones.
+CREATE OR REPLACE MATERIALIZED VIEW oro.mv_otp_ruta AS
+SELECT origen_id, destino_id,
+       COUNT(*) AS vuelos,
+       COUNTIF(a_tiempo) AS vuelos_a_tiempo,
+       COUNT(a_tiempo) AS vuelos_con_dato,
+       SUM(retraso_llegada_min) AS suma_retraso_min,
+       COUNT(retraso_llegada_min) AS vuelos_con_retraso
 FROM oro.fact_vuelos
-GROUP BY origen_id, destino_id
-HAVING vuelos >= 300;
+GROUP BY origen_id, destino_id;
+
+CREATE OR REPLACE VIEW oro.otp_por_ruta AS
+SELECT origen_id, destino_id, vuelos,
+       ROUND(100 * SAFE_DIVIDE(vuelos_a_tiempo, vuelos_con_dato), 1) AS otp_pct,
+       ROUND(SAFE_DIVIDE(suma_retraso_min, vuelos_con_retraso), 1) AS retraso_promedio_min
+FROM oro.mv_otp_ruta
+WHERE vuelos >= 300;
 
 CREATE OR REPLACE VIEW oro.otp_por_aerolinea AS
 SELECT f.aerolinea_id, a.nombre, d.mes, d.nombre_mes, COUNT(*) AS vuelos,
@@ -136,3 +148,22 @@ FROM plata.metar m
 JOIN oro.dim_aeropuerto a ON a.icao = m.icao
 WHERE TRUE
 QUALIFY ROW_NUMBER() OVER (PARTITION BY m.icao ORDER BY m.ts_observacion DESC) = 1;
+
+-- SLI de latencia del dato en vivo, por consulta (solo modo vivo; la reproducción repite datos viejos).
+--   extremo a extremo: desde que el avión emitió su posición (ts_posicion, ADS-B) hasta que Dataflow la
+--                      procesó y la envió a BigQuery (procesado_en)
+--   plataforma:        desde la consulta a OpenSky (ts_consulta) hasta procesado_en; es lo que controla Águila
+--   posición vieja:    aviones cuya última posición ya tenía 150 s o más cuando OpenSky la entregó
+-- SLO (meta de la Entrega 1): latencia menor a 3 minutos.
+CREATE OR REPLACE VIEW oro.sli_latencia AS
+SELECT
+  ts_consulta,
+  COUNT(*) AS aviones,
+  APPROX_QUANTILES(TIMESTAMP_DIFF(procesado_en, ts_posicion, SECOND), 100)[OFFSET(50)] AS e2e_p50_s,
+  APPROX_QUANTILES(TIMESTAMP_DIFF(procesado_en, ts_posicion, SECOND), 100)[OFFSET(95)] AS e2e_p95_s,
+  ROUND(100 * COUNTIF(TIMESTAMP_DIFF(procesado_en, ts_posicion, SECOND) < 180) / COUNT(*), 1) AS e2e_pct_menor_3min,
+  MAX(TIMESTAMP_DIFF(procesado_en, ts_consulta, SECOND)) AS plataforma_max_s,
+  ROUND(100 * COUNTIF(TIMESTAMP_DIFF(ts_consulta, ts_posicion, SECOND) >= 150) / COUNT(*), 1) AS pct_posicion_vieja
+FROM plata.posiciones
+WHERE modo = 'vivo' AND ts_posicion IS NOT NULL
+GROUP BY ts_consulta;
