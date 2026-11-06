@@ -76,6 +76,8 @@ gcloud dataproc batches submit pyspark gs://aguila-aeronexus-bronce/codigo/limpi
 - **Reprocesamiento (backfill):** si cambia la lógica de Spark o del SQL, `python batch/backfill.py` vuelve a ejecutar
   Spark desde el CSV crudo, recarga `plata.vuelos` y reconstruye plata y oro. Cada paso reemplaza su resultado, así que
   se puede relanzar sin duplicar. Con `--sin-spark` solo recarga y reconstruye con SQL.
+- **Reproceso en vivo:** las suscripciones guardan 7 días, incluidos los mensajes ya confirmados. Con
+  `gcloud pubsub subscriptions seek posiciones-sub --time=<fecha>` Dataflow vuelve a procesar desde esa fecha.
 - **Latencia:** `oro.sli_latencia` mide cada consulta en vivo. Meta (SLO): menos de 3 minutos.
 
 ## Licencia
