@@ -78,6 +78,9 @@ gcloud dataproc batches submit pyspark gs://aguila-aeronexus-bronce/codigo/limpi
   se puede relanzar sin duplicar. Con `--sin-spark` solo recarga y reconstruye con SQL.
 - **Reproceso en vivo:** las suscripciones guardan 7 días, incluidos los mensajes ya confirmados. Con
   `gcloud pubsub subscriptions seek posiciones-sub --time=<fecha>` Dataflow vuelve a procesar desde esa fecha.
+- **Duplicados:** Pub/Sub entrega al menos una vez y el seek o la reproducción reinsertan filas. `plata.posiciones`
+  guarda todo tal cual llega; `oro.fact_posiciones` deja solo las consultas en vivo y una fila por `icao24` +
+  `ts_consulta`.
 - **Latencia:** `oro.sli_latencia` mide cada consulta en vivo. Meta (SLO): menos de 3 minutos.
 
 ## Licencia

@@ -19,7 +19,7 @@ LEFT JOIN bronce.openflights_aerolineas o
   ON o.iata = a.aerolinea_iata AND o.activa = 'Y' AND o.icao IS NOT NULL AND o.pais = 'United States'
 QUALIFY ROW_NUMBER() OVER (PARTITION BY a.aerolinea_iata ORDER BY o.id) = 1;
 
--- dim_fecha (2015 para el historial y 2026 para el dato en vivo)
+-- dim_fecha (2015 para el historial y 2026 para el dato en vivo, cada año con sus feriados)
 CREATE OR REPLACE TABLE oro.dim_fecha AS
 SELECT
   d AS fecha_id,
@@ -34,7 +34,10 @@ SELECT
    OR (EXTRACT(MONTH FROM d) = 12 AND EXTRACT(DAY FROM d) >= 15)
    OR (EXTRACT(MONTH FROM d) = 1 AND EXTRACT(DAY FROM d) <= 5)) AS temporada_alta,
   d IN ('2015-01-01', '2015-01-19', '2015-02-16', '2015-05-25', '2015-07-03', '2015-09-07', '2015-10-12',
-        '2015-11-11', '2015-11-26', '2015-12-25') AS feriado
+        '2015-11-11', '2015-11-26', '2015-12-25',
+        -- feriados federales de EE.UU. 2026 (4 de julio cae sábado: se observa el viernes 3)
+        '2026-01-01', '2026-01-19', '2026-02-16', '2026-05-25', '2026-06-19', '2026-07-03', '2026-09-07',
+        '2026-10-12', '2026-11-11', '2026-11-26', '2026-12-25') AS feriado
 FROM UNNEST(ARRAY_CONCAT(GENERATE_DATE_ARRAY('2015-01-01', '2015-12-31'),
                          GENERATE_DATE_ARRAY('2026-01-01', '2026-12-31'))) AS d;
 
@@ -73,10 +76,17 @@ SELECT
 FROM plata.vuelos_enriquecidos v;
 
 -- fact_posiciones (vista: siempre muestra lo último que llegó por streaming)
+-- Grano: un avión en una consulta real a OpenSky.
+--   * Sin modo 'reproduccion': son grabaciones reenviadas cuando la PC está apagada, no datos nuevos.
+--     (modo NULL = filas de las primeras pruebas, anteriores a esa columna; eran en vivo.)
+--   * Pub/Sub entrega "al menos una vez" y el seek reenvía mensajes: queda una sola fila por
+--     (icao24, ts_consulta), la primera que procesó Dataflow.
+--   * ts_posicion muestra si OpenSky repitió la última posición conocida en varias consultas.
 CREATE OR REPLACE VIEW oro.fact_posiciones AS
 SELECT
   DATE(ts_consulta) AS fecha_id,
   ts_consulta,
+  ts_posicion,
   icao24,
   callsign,
   a.aerolinea_id,
@@ -88,7 +98,9 @@ SELECT
   velocidad_ms,
   en_tierra
 FROM plata.posiciones p
-LEFT JOIN oro.dim_aerolinea a ON a.aerolinea_icao = p.aerolinea_icao;
+LEFT JOIN oro.dim_aerolinea a ON a.aerolinea_icao = p.aerolinea_icao
+WHERE IFNULL(p.modo, 'vivo') = 'vivo'
+QUALIFY ROW_NUMBER() OVER (PARTITION BY p.icao24, p.ts_consulta ORDER BY p.procesado_en) = 1;
 
 -- Vistas de puntualidad (OTP = % de vuelos con 15 min de retraso o menos)
 
