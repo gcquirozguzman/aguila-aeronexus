@@ -12,7 +12,7 @@ arquitectura medallion (bronce, plata y oro). Proyecto del curso de Big Data (UT
 
 | Carpeta | Contenido |
 |---|---|
-| `batch/` | PySpark: limpia los vuelos de 2015, excluye octubre y separa los inválidos a cuarentena; `backfill.py` reprocesa todo el historial |
+| `batch/` | PySpark: limpia los vuelos de 2015, excluye octubre y separa los inválidos a cuarentena; `backfill.py` reprocesa todo el historial; `republicar.py` vuelve a publicar consultas en vivo guardadas en bronce |
 | `streaming/` | Apache Beam: aviones y METAR desde Pub/Sub, con el aeropuerto más cercano y un tópico de errores |
 | `ingesta/` | Cloud Run Job (OpenSky y METAR → Pub/Sub) con reintentos y backoff exponencial, colector para la PC y sus pruebas |
 | `sql/` | `plata.sql` (catálogos, clima NOAA y cruce) y `oro.sql` (modelo estrella y vistas de OTP) |
@@ -78,6 +78,8 @@ gcloud dataproc batches submit pyspark gs://aguila-aeronexus-bronce/codigo/limpi
   se puede relanzar sin duplicar. Con `--sin-spark` solo recarga y reconstruye con SQL.
 - **Reproceso en vivo:** las suscripciones guardan 7 días, incluidos los mensajes ya confirmados. Con
   `gcloud pubsub subscriptions seek posiciones-sub --time=<fecha>` Dataflow vuelve a procesar desde esa fecha.
+  Para fechas anteriores, `python batch/republicar.py --desde <fecha> --hasta <fecha>` vuelve a publicar las consultas
+  crudas guardadas en bronce (`--fuente metar` para el clima; `--simular` solo lista).
 - **Duplicados:** Pub/Sub entrega al menos una vez y el seek o la reproducción reinsertan filas. `plata.posiciones`
   guarda todo tal cual llega; `oro.fact_posiciones` deja solo las consultas en vivo y una fila por `icao24` +
   `ts_consulta`.
