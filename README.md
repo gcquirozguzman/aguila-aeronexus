@@ -1,90 +1,224 @@
-# aguila-aeronexus
+<h1 align="center">🦅 Águila</h1>
 
-Plataforma de datos Águila de AeroNexus Continental: pipelines en tiempo real y por lotes en Google Cloud con
-arquitectura medallion (bronce, plata y oro). Proyecto del curso de Big Data (UTEC, Grupo 4).
+<p align="center">
+  <b>La plataforma de datos de AeroNexus Continental.</b><br>
+  Aviones en vivo, clima de aeropuertos y 5.3 millones de vuelos históricos, listos para responder preguntas del negocio.
+</p>
 
-## Arquitectura
+<p align="center">
+  ☁️ Google Cloud &nbsp;·&nbsp; 🥉🥈🥇 Bronce, plata y oro &nbsp;·&nbsp; ⚡ Tiempo real y por lotes &nbsp;·&nbsp; 🎓 UTEC Big Data, Grupo 4
+</p>
 
-- **Tiempo real:** Cloud Scheduler → Cloud Run Job (`ingesta/`) → Pub/Sub → Dataflow (`streaming/pipeline.py`) → BigQuery `plata`
-- **Por lotes:** Cloud Storage (bronce) → Dataproc Serverless (`batch/limpiar_vuelos.py`) → BigQuery `plata` → SQL (`sql/`) → `oro`
+---
 
-## Estructura
+## 🎬 ¿Qué hace, en una imagen?
 
-| Carpeta | Contenido |
-|---|---|
-| `batch/` | PySpark: limpia los vuelos de 2015, excluye octubre y separa los inválidos a cuarentena; `backfill.py` reprocesa todo el historial; `republicar.py` vuelve a publicar consultas en vivo guardadas en bronce |
-| `streaming/` | Apache Beam: aviones y METAR desde Pub/Sub, con el aeropuerto más cercano y un tópico de errores |
-| `ingesta/` | Cloud Run Job (OpenSky y METAR → Pub/Sub) con reintentos y backoff exponencial, colector para la PC y sus pruebas |
-| `sql/` | `plata.sql` (catálogos, clima NOAA y cruce) y `oro.sql` (modelo estrella y vistas de OTP) |
+```mermaid
+flowchart LR
+    A["🛰️<br><b>OpenSky</b><br>aviones en vivo"] --> P["📨<br><b>Pub/Sub</b>"]
+    B["🌦️<br><b>METAR</b><br>clima cada 5 min"] --> P
+    P --> D["⚙️<br><b>Dataflow</b><br>limpia y cruza"]
+    D --> BQ["🗄️<br><b>BigQuery</b><br>plata → oro"]
+    C["📦<br><b>Vuelos 2015</b><br>5.3 M filas"] --> S["🔥<br><b>Dataproc</b><br>Spark"] --> BQ
+    BQ --> API["🔌<br><b>API</b><br>Cloud Run"]
+    BQ --> AG["💬<br><b>Agente</b><br>preguntas en español"]
 
-## Tablas principales
+    style BQ fill:#7c5cff,stroke:#7c5cff,color:#fff
+    style API fill:#22a06b,stroke:#22a06b,color:#fff
+    style AG fill:#22a06b,stroke:#22a06b,color:#fff
+```
 
-| Capa | Tabla o vista | Contenido |
-|---|---|---|
-| bronce (GCS) | `flight_delays/`, `openflights/`, `metar/`, `grabaciones/opensky/` | Archivos crudos tal como llegan |
-| plata | `vuelos`, `vuelos_cuarentena`, `vuelos_enriquecidos`, `clima_diario` | Vuelos 2015 limpios, inválidos y cruzados con clima |
-| plata | `posiciones`, `metar` | Tiempo real, particionadas por día y agrupadas por aeropuerto |
-| oro | `fact_vuelos`, `dim_*`, `fact_posiciones` | Modelo estrella |
-| oro | `mv_otp_ruta` | Vista materializada: totales de puntualidad por ruta ya calculados |
-| oro | `otp_por_ruta`, `otp_por_aerolinea`, `causas_retraso`, `clima_actual` | Vistas para el negocio |
-| oro | `sli_latencia` | SLI de latencia por consulta: de la emisión ADS-B a BigQuery y de la consulta a BigQuery |
+Dos caminos llegan al mismo lugar: el **tiempo real** (aviones y clima de hoy) y el **histórico** (puntualidad de 2015).
+Todo termina en la capa **oro** de BigQuery, que se consulta con la API o conversando con el agente.
 
-## Seguridad
+---
 
-Cada pipeline usa su propia cuenta de servicio con permisos mínimos:
+## 🧰 Las piezas
 
-| Cuenta | Usada por | Permisos |
-|---|---|---|
-| `sa-ingesta` | Cloud Run Jobs y Cloud Scheduler | Publicar en `posiciones` y `metar`, bucket bronce, leer el secreto de OpenSky, ejecutar los jobs |
-| `sa-dataflow` | Dataflow | Leer las suscripciones, publicar en `errores`, escribir en `plata`, bucket bronce |
-| `sa-dataproc` | Dataproc Serverless | Bucket bronce |
+|     | Carpeta | Para qué sirve |
+| :-: | :------ | :------------- |
+| 🛰️ | **`ingesta/`** | Pide aviones a OpenSky y clima a METAR y los envía a Pub/Sub. Reintenta si la fuente falla. |
+| ⚙️ | **`streaming/`** | Pipeline de Dataflow (Apache Beam): limpia cada avión, le pone el aeropuerto más cercano y lo guarda en BigQuery. |
+| 🔥 | **`batch/`** | Spark limpia los vuelos de 2015; también reprocesa todo (`backfill.py`) o vuelve a publicar días pasados (`republicar.py`). |
+| 🗄️ | **`sql/`** | Construye plata y oro: modelo estrella, puntualidad por ruta y aerolínea, clima actual y latencia. |
+| 🔌 | **`api/`** | API en Cloud Run que entrega aviones, clima y puntualidad en JSON. |
 
-La credencial de OpenSky vive en Secret Manager (`opensky-credentials`), nunca en el código.
+El colector que corre en la PC está en otro repositorio: [radar-colector](https://github.com/gcquirozguzman/radar-colector).
 
-## Fuentes
+---
 
-OpenSky Network, aviationweather.gov (METAR), Flight Delays 2015 (BTS/Kaggle), NOAA GSOD (BigQuery público) y OpenFlights.
+## 🔌 La API
 
-OpenSky bloquea las IP de los grandes proveedores de nube. Por eso el colector de aviones corre en una PC
-(`ingesta/colector_pc.py` o el proyecto [radar-colector](https://github.com/gcquirozguzman/radar-colector)) y graba
-cada consulta. Si el colector no está activo, el Cloud Run Job reproduce la última grabación real (`modo=reproduccion`).
+Vive en Cloud Run y es privada: solo responde a quien tiene acceso al proyecto.
 
-## Ejecución
+| Pregunta del negocio | Endpoint |
+| :------------------- | :------- |
+| ¿Cómo está hoy un aeropuerto? | `GET /aeropuertos/ATL/panorama` |
+| ¿Qué aviones hay cerca? | `GET /aeropuertos/DFW/aviones?radio_km=30` |
+| ¿Qué clima tiene ahora? | `GET /aeropuertos/ORD/clima` |
+| ¿Qué tan puntual es una ruta? | `GET /rutas/LAX/SFO/otp` |
+| ¿Qué tan puntual es una aerolínea, mes a mes? | `GET /aerolineas/AA/otp` |
+
+### Probarla en el navegador
+
+```
+gcloud run services proxy aguila-api --region us-central1 --project aguila-aeronexus
+```
+
+Abre http://localhost:8080/docs y prueba cada endpoint con el botón **Try it out**.
+
+### Probarla desde la terminal
+
+```
+curl -H "Authorization: Bearer $(gcloud auth print-identity-token)" https://aguila-api-305567386804.us-central1.run.app/rutas/LAX/SFO/otp
+```
+
+> 🟢 Responde `{"origen_id":"LAX","destino_id":"SFO","vuelos":13457,"otp_pct":72.9,...}` → todo bien.
+> 🔴 Responde `403` → falta el token o tu cuenta no tiene acceso al proyecto.
+
+---
+
+## 💬 El agente
+
+En BigQuery → **Agentes** está **Águila Analista**. Se le pregunta en español, por ejemplo:
+
+- *¿Cuáles son las 5 rutas con peor puntualidad?*
+- *¿Qué aeropuertos tienen hoy condición adversa?*
+- *¿Cuántos aviones hay ahora cerca de Atlanta?*
+
+Lee solo la capa oro y muestra la consulta SQL que usó para responder.
+
+---
+
+## 🚀 Primera vez (solo una vez)
+
+### 1️⃣ Ten Python 3.12 y gcloud
+
+`py -3.12 --version` y `gcloud --version` deben responder con un número.
+
+### 2️⃣ Inicia sesión en Google Cloud
+
+```
+gcloud auth login
+gcloud auth application-default login
+gcloud config set project aguila-aeronexus
+```
+
+### 3️⃣ Instala las librerías
+
+<details open>
+<summary><b>🪟 Windows</b></summary>
 
 ```
 py -3.12 -m venv .venv
-.venv\Scripts\python -m pip install "apache-beam[gcp]==2.61.0" -r ingesta/requirements.txt
+.venv\Scripts\python -m pip install "apache-beam[gcp]==2.61.0" -r ingesta/requirements.txt -r api/requirements.txt
+```
 
-# por lotes
-gcloud storage cp batch/limpiar_vuelos.py gs://aguila-aeronexus-bronce/codigo/
-gcloud dataproc batches submit pyspark gs://aguila-aeronexus-bronce/codigo/limpiar_vuelos.py --region=us-central1 --version=2.2 --service-account=sa-dataproc@aguila-aeronexus.iam.gserviceaccount.com --staging-bucket=aguila-aeronexus-bronce -- gs://aguila-aeronexus-bronce/flight_delays/2015/flights.csv gs://aguila-aeronexus-bronce/plata
+</details>
 
-# tiempo real (local, gratis)
-.venv\Scripts\python streaming/pipeline.py --runner DirectRunner --temp_location gs://aguila-aeronexus-bronce/tmp
+<details>
+<summary><b>🍎 Mac / 🐧 Linux</b></summary>
 
-# tiempo real (Dataflow, 1 worker)
+```
+python3.12 -m venv .venv
+.venv/bin/python -m pip install "apache-beam[gcp]==2.61.0" -r ingesta/requirements.txt -r api/requirements.txt
+```
+
+</details>
+
+---
+
+## 🎯 La demo, paso a paso
+
+```mermaid
+flowchart LR
+    A["⚙️<br>Enciendes<br>Dataflow"] --> B["▶️<br>Reanudas<br>los schedulers"] --> C["🛰️<br>Inicias<br>el colector"] --> D["🔌<br>Consultas la API<br>y el agente"] --> E["⛔<br>Apagas<br>todo"]
+    style E fill:#e5484d,stroke:#e5484d,color:#fff
+```
+
+**1. Enciende Dataflow** (unos 5 minutos antes; tarda en arrancar):
+
+```
 .venv\Scripts\python streaming/pipeline.py --runner DataflowRunner --region us-central1 --temp_location gs://aguila-aeronexus-bronce/tmp --staging_location gs://aguila-aeronexus-bronce/staging --job_name aguila-streaming --num_workers 1 --max_num_workers 1 --machine_type n1-standard-2 --enable_streaming_engine --experiments use_runner_v2 --service_account_email sa-dataflow@aguila-aeronexus.iam.gserviceaccount.com
 ```
 
-## Calidad y resiliencia
+**2. Reanuda la ingesta en la nube:**
 
-- **Reintentos:** `ingesta/main.py` reintenta las llamadas a OpenSky y METAR con backoff exponencial (2, 4 y 8 s, más
-  un azar) ante caídas de red, `429` y `5xx`, y respeta `Retry-After`. Si la API pide esperar más de 60 s, o si fallan
-  los 4 intentos, OpenSky pasa a la reproducción de la grabación. Pruebas: `python -m unittest ingesta/test_reintentos.py`.
-- **Errores:** Dataflow envía los registros inválidos al tópico `errores` (salida secundaria del pipeline). Es el patrón
-  que recomienda Google para Dataflow, en lugar de la dead-letter policy de la suscripción.
-- **Reprocesamiento (backfill):** si cambia la lógica de Spark o del SQL, `python batch/backfill.py` vuelve a ejecutar
-  Spark desde el CSV crudo, recarga `plata.vuelos` y reconstruye plata y oro. Cada paso reemplaza su resultado, así que
-  se puede relanzar sin duplicar. Con `--sin-spark` solo recarga y reconstruye con SQL.
-- **Reproceso en vivo:** las suscripciones guardan 7 días, incluidos los mensajes ya confirmados. Con
-  `gcloud pubsub subscriptions seek posiciones-sub --time=<fecha>` Dataflow vuelve a procesar desde esa fecha.
-  Para fechas anteriores, `python batch/republicar.py --desde <fecha> --hasta <fecha>` vuelve a publicar las consultas
-  crudas guardadas en bronce (`--fuente metar` para el clima; `--simular` solo lista).
-- **Duplicados:** Pub/Sub entrega al menos una vez y el seek o la reproducción reinsertan filas. `plata.posiciones`
-  guarda todo tal cual llega; `oro.fact_posiciones` deja solo las consultas en vivo y una fila por `icao24` +
-  `ts_consulta`.
-- **Latencia:** `oro.sli_latencia` mide cada consulta en vivo. Meta (SLO): menos de 3 minutos.
+```
+gcloud scheduler jobs resume aguila-opensky --location us-central1
+gcloud scheduler jobs resume aguila-metar --location us-central1
+```
 
-## Licencia
+**3. Inicia el colector en la PC** ([radar-colector](https://github.com/gcquirozguzman/radar-colector)) y pulsa **Iniciar**.
+
+**4. Muestra los datos llegando:** la API (`/aeropuertos/ATL/panorama`) y el agente.
+
+**5. Apaga todo al terminar.** ⚠️ Dataflow encendido cuesta unos S/ 15 a S/ 20 al día.
+
+```
+gcloud dataflow jobs drain $(gcloud dataflow jobs list --region us-central1 --status active --format "value(id)") --region us-central1
+gcloud scheduler jobs pause aguila-opensky --location us-central1
+gcloud scheduler jobs pause aguila-metar --location us-central1
+```
+
+💡 **Tip:** para practicar sin gastar, corre el pipeline en tu PC con `--runner DirectRunner --temp_location gs://aguila-aeronexus-bronce/tmp`.
+
+---
+
+## 🗄️ Lo que hay en BigQuery
+
+| Capa | Qué guarda |
+| :--- | :--------- |
+| 🥉 **bronce** (Cloud Storage) | Los archivos tal como llegan: CSV de vuelos, OpenFlights, METAR y cada consulta a OpenSky. |
+| 🥈 **plata** | Vuelos 2015 limpios (`vuelos`), los inválidos (`vuelos_cuarentena`), clima diario NOAA y lo que llega en vivo (`posiciones`, `metar`). |
+| 🥇 **oro** | Modelo estrella (`fact_vuelos`, `fact_posiciones`, `dim_*`) y vistas para el negocio: `otp_por_ruta`, `otp_por_aerolinea`, `causas_retraso`, `clima_actual`, `sli_latencia`. |
+
+<details>
+<summary><b>🔥 Cargar el histórico (lotes)</b></summary>
+
+```
+gcloud storage cp batch/limpiar_vuelos.py gs://aguila-aeronexus-bronce/codigo/
+gcloud dataproc batches submit pyspark gs://aguila-aeronexus-bronce/codigo/limpiar_vuelos.py --region=us-central1 --version=2.2 --service-account=sa-dataproc@aguila-aeronexus.iam.gserviceaccount.com --staging-bucket=aguila-aeronexus-bronce -- gs://aguila-aeronexus-bronce/flight_delays/2015/flights.csv gs://aguila-aeronexus-bronce/plata
+```
+
+Después se ejecutan `sql/plata.sql` y `sql/oro.sql` en BigQuery. Para rehacer todo de una vez: `python batch/backfill.py`.
+
+</details>
+
+<details>
+<summary><b>🔌 Desplegar la API</b></summary>
+
+```
+gcloud run deploy aguila-api --source api --region us-central1 --service-account sa-api@aguila-aeronexus.iam.gserviceaccount.com --no-allow-unauthenticated --max-instances 2
+```
+
+</details>
+
+---
+
+## 🛡️ Calidad y seguridad
+
+| | Qué pasa | Cómo lo resolvemos |
+| :-: | :------- | :----------------- |
+| 🔁 | OpenSky o METAR fallan | Reintenta 4 veces (2, 4 y 8 s) y respeta `Retry-After`; si sigue fallando, reproduce la última grabación real. |
+| 🚫 | Llega un dato roto | Dataflow lo manda al tópico `errores` y sigue con el resto. |
+| ♻️ | Hay que reprocesar | En los últimos 7 días: `gcloud pubsub subscriptions seek posiciones-sub --time=<fecha>`. Antes: `python batch/republicar.py --desde <fecha> --hasta <fecha>`. |
+| 👯 | Llegan duplicados | `oro.fact_posiciones` deja una sola fila por avión y consulta. |
+| ⏱️ | ¿Llega a tiempo? | `oro.sli_latencia` mide cada consulta. Meta: menos de 3 minutos. |
+| 🔑 | Credenciales | La de OpenSky vive en Secret Manager. Cada pieza usa su propia cuenta con lo mínimo: `sa-ingesta`, `sa-dataflow`, `sa-dataproc`, `sa-api` (solo lectura). |
+
+Pruebas de los reintentos: `python -m unittest ingesta/test_reintentos.py`.
+
+---
+
+## 📚 Fuentes
+
+OpenSky Network · aviationweather.gov (METAR) · Flight Delays 2015 (BTS/Kaggle) · NOAA GSOD · OpenFlights
+
+> OpenSky bloquea las IP de los grandes proveedores de nube. Por eso los aviones los pide un colector en una PC
+> ([radar-colector](https://github.com/gcquirozguzman/radar-colector)). Si la PC está apagada, la nube reproduce la
+> última grabación real y la marca como `modo=reproduccion`.
+
+## 📄 Licencia
 
 MIT
