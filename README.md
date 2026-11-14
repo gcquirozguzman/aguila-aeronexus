@@ -88,6 +88,9 @@ En BigQuery → **Agentes** está **Águila Analista**. Se le pregunta en españ
 
 Lee solo la capa oro y muestra la consulta SQL que usó para responder.
 
+✨ También está registrado en **Gemini Enterprise** (app `aguila-aeronexus`) para usarlo desde el chat de la empresa:
+en BigQuery se publica con **Registrar este agente** y **Copiar JSON**, y en Gemini Enterprise → **Agentes → Agregar agente → A2A** se pega ese JSON.
+
 ---
 
 ## 🚀 Primera vez (solo una vez)
