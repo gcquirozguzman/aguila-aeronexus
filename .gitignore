@@ -20,3 +20,9 @@ credentials.json
 Thumbs.db
 .vscode/
 .idea/
+
+# Terraform
+infra/.terraform/
+infra/*.tfstate*
+infra/plan.bin
+infra/*.tfplan
