@@ -42,6 +42,7 @@ Todo termina en la capa **oro** de BigQuery, que se consulta con la API o conver
 | 🔥 | **`batch/`** | Spark limpia los vuelos de 2015; también reprocesa todo (`backfill.py`) o vuelve a publicar días pasados (`republicar.py`). |
 | 🗄️ | **`sql/`** | Construye plata y oro: modelo estrella, puntualidad por ruta y aerolínea, clima actual y latencia. |
 | 🔌 | **`api/`** | API en Cloud Run que entrega aviones, clima y puntualidad en JSON. |
+| 🏷️ | **`gobierno/`** | Gobierno como código: plantilla de Knowledge Catalog y los valores de cada tabla. |
 
 El colector que corre en la PC está en otro repositorio: [radar-colector](https://github.com/gcquirozguzman/radar-colector).
 
@@ -209,6 +210,7 @@ gcloud run deploy aguila-api --source api --region us-central1 --service-account
 | 👯 | Llegan duplicados | `oro.fact_posiciones` deja una sola fila por avión y consulta. |
 | ⏱️ | ¿Llega a tiempo? | `oro.sli_latencia` mide cada consulta. Meta: menos de 3 minutos. |
 | 🔑 | Credenciales | La de OpenSky vive en Secret Manager. Cada pieza usa su propia cuenta con lo mínimo: `sa-ingesta`, `sa-dataflow`, `sa-dataproc`, `sa-api` (solo lectura). |
+| 🏷️ | ¿De quién es cada tabla? | En Knowledge Catalog, la plantilla **Gobierno Águila** dice capa, dueño, custodio, clasificación, calidad y retención de las 20 tablas y vistas. Se aplica con `python gobierno/etiquetar.py`. |
 
 Pruebas de los reintentos: `python -m unittest ingesta/test_reintentos.py`.
 
