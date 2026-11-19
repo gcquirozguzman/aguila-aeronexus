@@ -42,7 +42,7 @@ Todo corre en Google Cloud y se levanta con Terraform: no depende de ninguna PC.
 | 🛰️ | **`ingesta/`** | Contenedor que corre como Cloud Run Job: pide aviones a adsb.lol (o a OpenSky) y clima a METAR, los guarda en bronce y los envía a Pub/Sub. Reintenta si la fuente falla. |
 | ⚙️ | **`streaming/`** | Pipeline de Dataflow (Apache Beam): limpia cada avión, le pone el aeropuerto más cercano y lo guarda en BigQuery. `operar.py` lo enciende y apaga sin mensajes acumulados. |
 | 🔥 | **`batch/`** | Spark limpia los vuelos de 2015; también reprocesa todo (`backfill.py`) o vuelve a publicar días pasados (`republicar.py`). |
-| 🗄️ | **`sql/`** | Construye plata y oro: modelo estrella, puntualidad por ruta y aerolínea, clima actual y latencia. |
+| 🗄️ | **`sql/`** | Construye plata y oro: modelo estrella, puntualidad por ruta y aerolínea, clima actual y latencia. `ml.sql` entrena con BigQuery ML el modelo que predice el riesgo de retraso de cada vuelo. |
 | 🔌 | **`api/`** | API en Cloud Run que entrega aviones, clima y puntualidad en JSON. |
 | 🏷️ | **`gobierno/`** | Gobierno como código: plantilla de Knowledge Catalog y los valores de cada tabla. |
 
