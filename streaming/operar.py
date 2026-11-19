@@ -3,7 +3,7 @@
   python streaming/operar.py encender   1) descarta lo acumulado mientras estuvo apagado (seek a ahora;
                                            ese dato ya está guardado en bronce y se puede republicar),
                                         2) lanza Dataflow con autoescalado (1 a 2 workers),
-                                        3) reanuda los schedulers de ingesta.
+                                        3) reanuda la ingesta con terraform apply -var ingesta_activa=true.
   python streaming/operar.py apagar     drena Dataflow (termina lo que tiene en curso) y pausa la ingesta.
   python streaming/operar.py estado     muestra el job activo y los mensajes pendientes.
 
@@ -27,6 +27,18 @@ def gcloud(*args):
                           text=True, encoding="utf-8").stdout.strip()
 
 
+def ingesta(activa):
+    """Reanuda o pausa los schedulers con Terraform (infra/), así el estado declarado y el real coinciden."""
+    terraform = shutil.which("terraform")
+    if terraform:
+        print(f"$ terraform apply -auto-approve -var ingesta_activa={str(activa).lower()}")
+        subprocess.run([terraform, "apply", "-auto-approve", "-input=false", f"-var=ingesta_activa={str(activa).lower()}"],
+                       cwd="infra", check=True)
+        return
+    for s in SCHEDULERS:  # sin Terraform instalado, el mismo efecto con gcloud
+        gcloud("scheduler", "jobs", "resume" if activa else "pause", s, f"--location={REGION}")
+
+
 def job_activo():
     return gcloud("dataflow", "jobs", "list", f"--region={REGION}", "--status=active", "--format=value(id)")
 
@@ -43,16 +55,14 @@ def encender():
                     "--autoscaling_algorithm=THROUGHPUT_BASED", "--machine_type=n1-standard-2",
                     "--enable_streaming_engine", "--experiments=use_runner_v2",
                     f"--service_account_email=sa-dataflow@{PROYECTO}.iam.gserviceaccount.com"], check=True)
-    for s in SCHEDULERS:
-        gcloud("scheduler", "jobs", "resume", s, f"--location={REGION}")
+    ingesta(True)
     print("Tiempo real encendido. Dataflow tarda unos 4 minutos en procesar el primer mensaje.")
 
 
 def apagar():
     for j in job_activo().split():
         gcloud("dataflow", "jobs", "drain", j, f"--region={REGION}")
-    for s in SCHEDULERS:
-        gcloud("scheduler", "jobs", "pause", s, f"--location={REGION}")
+    ingesta(False)
     print("Dataflow drenándose y schedulers en pausa: no queda nada generando costo.")
 
 
