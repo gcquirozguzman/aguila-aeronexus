@@ -143,23 +143,30 @@ def run(argv=None):
     opciones.view_as(StandardOptions).streaming = True
     sub = f"projects/{PROYECTO}/subscriptions"
 
-    with beam.Pipeline(options=opciones) as p:
-        aviones = (
-            p
-            | "Leer posiciones" >> beam.io.ReadFromPubSub(subscription=f"{sub}/posiciones-sub")
-            | "Separar aviones" >> beam.FlatMap(separar_lote)
-            | "Validar y enriquecer" >> beam.ParDo(EnriquecerAvion()).with_outputs(EnriquecerAvion.ERRORES, main="ok")
-        )
-        aviones.ok | "Guardar posiciones" >> bq("posiciones", ESQUEMA_POSICIONES, "ts_consulta", ["aeropuerto_cercano_iata", "icao24"])
-        aviones.errores | "Enviar errores" >> beam.io.WriteToPubSub(f"projects/{PROYECTO}/topics/errores")
+    p = beam.Pipeline(options=opciones)
+    aviones = (
+        p
+        | "Leer posiciones" >> beam.io.ReadFromPubSub(subscription=f"{sub}/posiciones-sub")
+        | "Separar aviones" >> beam.FlatMap(separar_lote)
+        | "Validar y enriquecer" >> beam.ParDo(EnriquecerAvion()).with_outputs(EnriquecerAvion.ERRORES, main="ok")
+    )
+    aviones.ok | "Guardar posiciones" >> bq("posiciones", ESQUEMA_POSICIONES, "ts_consulta", ["aeropuerto_cercano_iata", "icao24"])
+    aviones.errores | "Enviar errores" >> beam.io.WriteToPubSub(f"projects/{PROYECTO}/topics/errores")
 
-        (
-            p
-            | "Leer METAR" >> beam.io.ReadFromPubSub(subscription=f"{sub}/metar-sub")
-            | "Separar reportes" >> beam.FlatMap(separar_lote)
-            | "Limpiar METAR" >> beam.FlatMap(limpiar_metar)
-            | "Guardar METAR" >> bq("metar", ESQUEMA_METAR, "ts_observacion", ["icao"])
-        )
+    (
+        p
+        | "Leer METAR" >> beam.io.ReadFromPubSub(subscription=f"{sub}/metar-sub")
+        | "Separar reportes" >> beam.FlatMap(separar_lote)
+        | "Limpiar METAR" >> beam.FlatMap(limpiar_metar)
+        | "Guardar METAR" >> bq("metar", ESQUEMA_METAR, "ts_observacion", ["icao"])
+    )
+
+    resultado = p.run()
+    # En Dataflow el job queda corriendo en la nube y el script termina; en la PC (DirectRunner) se espera aquí.
+    if "DataflowRunner" not in str(opciones.view_as(StandardOptions).runner):
+        resultado.wait_until_finish()
+    else:
+        print(f"Job de Dataflow lanzado: {resultado.job_id()}")
 
 
 if __name__ == "__main__":
